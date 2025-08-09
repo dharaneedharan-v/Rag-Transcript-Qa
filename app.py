@@ -32,26 +32,49 @@ def load_embeddings():
     """Load HuggingFace embeddings for RAG"""
     return HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
 
+# def get_youtube_transcript(url):
+#     try:
+#         video_id = YouTube(url).video_id
+#         ytt_api = YouTubeTranscriptApi()
+#         transcript_list = ytt_api.list(video_id)
+#         transcript = transcript_list.find_transcript(["en"])
+#         transcript_data = transcript.fetch()
+
+        
+#         text_parts = []
+#         for item in transcript_data:
+#             if hasattr(item, 'text'):
+#                 text_parts.append(item.text)
+#             elif isinstance(item, dict) and 'text' in item:
+#                 text_parts.append(item['text'])
+#             else:
+#                 text_parts.append(str(item))
+        
+#         return " ".join(text_parts)
+#     except Exception as e:
+#         st.error(f"Error getting transcript: {e}")
+#         return ""
+
 def get_youtube_transcript(url):
     try:
         video_id = YouTube(url).video_id
-        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-        transcript = transcript_list.find_transcript(["en"])
-        transcript_data = transcript.fetch()
-        
-        text_parts = []
-        for item in transcript_data:
-            if hasattr(item, 'text'):
-                text_parts.append(item.text)
-            elif isinstance(item, dict) and 'text' in item:
-                text_parts.append(item['text'])
-            else:
-                text_parts.append(str(item))
-        
+        # Directly get the transcript in English
+        transcript_data = YouTubeTranscriptApi.get_transcript(video_id, languages=['en'])
+
+        text_parts = [item['text'] for item in transcript_data if 'text' in item]
         return " ".join(text_parts)
+
+    except TranscriptsDisabled:
+        st.error("Transcripts are disabled for this video.")
+    except NoTranscriptFound:
+        st.error("No transcript found for this video.")
+    except VideoUnavailable:
+        st.error("The video is unavailable.")
+    except CouldNotRetrieveTranscript:
+        st.error("Could not retrieve the transcript.")
     except Exception as e:
         st.error(f"Error getting transcript: {e}")
-        return ""
+    return ""
 
 def save_transcript_to_file(text, filename="transcript.txt"):
     with open(filename, "w", encoding="utf-8") as f:

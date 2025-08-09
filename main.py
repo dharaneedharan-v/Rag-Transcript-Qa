@@ -6,13 +6,19 @@ from langchain_community.document_loaders import TextLoader
 from langchain.text_splitter import CharacterTextSplitter
 from langchain_groq import ChatGroq
 from pytube import YouTube
-from youtube_transcript_api import (
-    YouTubeTranscriptApi,
-    TranscriptsDisabled, 
-    NoTranscriptFound,
-    VideoUnavailable,                                                                                                           
-    CouldNotRetrieveTranscript
-)
+# from youtube_transcript_api import (
+#     YouTubeTranscriptApi,
+#     TranscriptsDisabled, 
+#     NoTranscriptFound,
+#     VideoUnavailable,                                                                                                           
+#     CouldNotRetrieveTranscript
+
+# )
+
+import yt_dlp
+import json
+import re
+
 from dotenv import load_dotenv
 import re
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -114,27 +120,207 @@ def load_embeddings():
     """Load HuggingFace embeddings for RAG"""
     return HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
 
-def get_youtube_transcript(url):
+# def get_youtube_transcript(url):
+#     try:
+#         video_id = YouTube(url).video_id
+#         transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+#         transcript = transcript_list.find_transcript(["en"])
+#         transcript_data = transcript.fetch()
+        
+#         text_parts = []
+#         for item in transcript_data:
+#             if hasattr(item, 'text'):
+#                 text_parts.append(item.text)
+#             elif isinstance(item, dict) and 'text' in item:
+#                 text_parts.append(item['text'])
+#             else:
+#                 text_parts.append(str(item))
+        
+#         return " ".join(text_parts)
+#     except Exception as e:
+#         st.error(f"Error getting transcript: {e}")
+#         return ""
+
+# # def get_youtube_transcript(url):
+# #     try:
+# #         video_id = YouTube(url).video_id
+# #         # Directly get the transcript in English
+# #         transcript_data = YouTubeTranscriptApi.get_transcript(video_id, languages=['en'])
+
+# #         text_parts = [item['text'] for item in transcript_data if 'text' in item]
+# #         return " ".join(text_parts)
+
+# #     except TranscriptsDisabled:
+# #         st.error("Transcripts are disabled for this video.")
+# #     except NoTranscriptFound:
+# #         st.error("No transcript found for this video.")
+# #     except VideoUnavailable:
+# #         transcript_data = YouTubeTranscriptApi.get_transcript(video_id, languages=['en'])
+
+# #         text_parts = [item['text'] for item in transcript_data if 'text' in item]
+# #         return " ".join(text_parts)
+
+# #     except TranscriptsDisabled:
+# #         st.error("Transcripts are disabled for this video.")
+# #     except NoTranscriptFound:
+# #         st.error("No transcript found for this video.")
+# #     except VideoUnavailable:
+# #         st.error("The video is unavailable.")
+# #     except CouldNotRetrieveTranscript:
+# #         st.error("Could not retrieve the transcript.")
+# #     except Exception as e:
+# #         st.error(f"Error getting transcript: {e}")
+# #     return ""
+
+# def get_youtube_transcript(url):
+#     try:
+#         video_id = YouTube(url).video_id
+#         # Directly get the transcript in English
+#         transcript_data = YouTubeTranscriptApi.get_transcript(video_id, languages=['en'])
+
+#         text_parts = [item['text'] for item in transcript_data if 'text' in item]
+#         return " ".join(text_parts)
+
+#     except TranscriptsDisabled:
+#         st.error("Transcripts are disabled for this video.")
+#     except NoTranscriptFound:
+#         st.error("No transcript found for this video.")
+#     except VideoUnavailable:
+#         st.error("The video is unavailable.")
+#     except CouldNotRetrieveTranscript:
+#         st.error("Could not retrieve the transcript.")
+#     except Exception as e:
+#         st.error(f"Error getting transcript: {e}")
+#     return ""
+
+def parse_youtube_json_transcript(raw_text):
+    """Parse YouTube's JSON transcript format"""
     try:
-        video_id = YouTube(url).video_id
-        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-        transcript = transcript_list.find_transcript(["en"])
-        transcript_data = transcript.fetch()
+        # Try to parse as JSON
+        data = json.loads(raw_text)
         
         text_parts = []
-        for item in transcript_data:
-            if hasattr(item, 'text'):
-                text_parts.append(item.text)
-            elif isinstance(item, dict) and 'text' in item:
-                text_parts.append(item['text'])
-            else:
-                text_parts.append(str(item))
         
-        return " ".join(text_parts)
-    except Exception as e:
-        st.error(f"Error getting transcript: {e}")
-        return ""
+        # Navigate the JSON structure
+        if 'events' in data:
+            for event in data['events']:
+                if 'segs' in event:
+                    for seg in event['segs']:
+                        if 'utf8' in seg:
+                            text = seg['utf8'].strip()
+                            # Skip newlines and empty segments
+                            if text and text != '\n':
+                                text_parts.append(text)
+        
+        # Join and clean the text
+        clean_text = ' '.join(text_parts)
+        clean_text = re.sub(r'\s+', ' ', clean_text).strip()
+        
+        return clean_text
+        
+    except:
+        # If JSON parsing fails, try VTT parsing
+        return parse_vtt_format(raw_text)
 
+def parse_vtt_format(vtt_text):
+    """Parse VTT subtitle format"""
+    try:
+        lines = vtt_text.split('\n')
+        text_lines = []
+        
+        for line in lines:
+            line = line.strip()
+            
+            # Skip timestamps, headers, and empty lines
+            if (not line or 
+                '-->' in line or 
+                line.startswith('WEBVTT') or
+                line.startswith('Kind:') or
+                line.startswith('Language:') or
+                re.match(r'^\d{2}:\d{2}:\d{2}', line) or
+                line.isdigit()):
+                continue
+            
+            # Remove HTML tags
+            clean_line = re.sub(r'<[^>]+>', '', line)
+            if clean_line:
+                text_lines.append(clean_line)
+        
+        full_text = ' '.join(text_lines)
+        full_text = re.sub(r'\s+', ' ', full_text).strip()
+        
+        return full_text
+            
+    except Exception as e:
+        return vtt_text  # Return original if parsing fails
+
+def get_youtube_transcript(url):
+    """Get YouTube transcript using yt-dlp with proper JSON parsing"""
+    try:
+        st.info("🔄 Extracting transcript using yt-dlp...")
+        
+        ydl_opts = {
+            'writesubtitles': True,
+            'writeautomaticsub': True,
+            'subtitleslangs': ['en'],
+            'skip_download': True,
+            'quiet': True,
+            'no_warnings': True,
+        }
+        
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            # Extract video info
+            info = ydl.extract_info(url, download=False)
+            
+            st.success(f"🎥 Video: {info.get('title', 'Unknown')}")
+            
+            # Get subtitles and auto-captions
+            subtitles = info.get('subtitles', {})
+            auto_captions = info.get('automatic_captions', {})
+            
+            transcript_text = None
+            
+            # Try manual subtitles first
+            if 'en' in subtitles:
+                subtitle_url = subtitles['en'][0]['url']
+                response = ydl.urlopen(subtitle_url)
+                transcript_text = response.read().decode('utf-8')
+                st.success("✅ Found manual English subtitles")
+                
+            # Try auto-generated captions
+            elif 'en' in auto_captions:
+                subtitle_url = auto_captions['en'][0]['url']
+                response = ydl.urlopen(subtitle_url)
+                transcript_text = response.read().decode('utf-8')
+                st.success("✅ Found auto-generated English captions")
+            
+            else:
+                available_subs = list(subtitles.keys()) + list(auto_captions.keys())
+                if available_subs:
+                    st.warning(f"⚠️ No English subtitles. Available: {', '.join(set(available_subs))}")
+                else:
+                    st.error("❌ No subtitles available for this video")
+                return ""
+            
+            if transcript_text:
+                # Parse the transcript based on format
+                if transcript_text.strip().startswith('{'):
+                    # JSON format
+                    clean_text = parse_youtube_json_transcript(transcript_text)
+                else:
+                    # VTT format
+                    clean_text = parse_vtt_format(transcript_text)
+                
+                if clean_text and len(clean_text) > 50:
+                    st.success(f"✅ Extracted {len(clean_text)} characters of clean transcript")
+                    return clean_text
+                else:
+                    st.error("❌ Could not extract readable text from transcript")
+                    return ""
+            
+    except Exception as e:
+        st.error(f"❌ Error extracting transcript: {str(e)}")
+        return ""
 def save_transcript_to_file(text, filename="transcript.txt"):
     with open(filename, "w", encoding="utf-8") as f:
         f.write(text)
