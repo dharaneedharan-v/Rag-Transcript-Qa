@@ -5,9 +5,10 @@ langchain-community
 langchain-openai
 sentence-transformers
 pytube
-youtube-transcript-api==1.2.2
+# youtube-transcript-api==1.2.2
 python-dotenv
 faiss-cpu
 scikit-learn
 numpy
 openai
+yt_dlp
